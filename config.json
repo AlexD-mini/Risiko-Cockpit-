@@ -1,0 +1,12 @@
+{
+  "_hinweis": "Manuelle Werte quartalsweise/monatlich pflegen. 'wert' auf null setzen = nicht gewertet.",
+  "manuell": {
+    "cape":   { "wert": 40.9, "stand": "2026-08-01", "quelle": "multpl.com/shiller-pe" },
+    "top10":  { "wert": 35.6, "stand": "2026-04-13", "quelle": "SSGA SPY Holdings" },
+    "margin": { "wert": 49,   "stand": "2026-06 (publ. 24.07.)", "quelle": "FINRA Margin Statistics" },
+    "hs_fcf": { "wert": 6.8,  "stand": "2026-07-30", "quelle": "Q2-Berichte MSFT/GOOGL/AMZN/META" },
+    "skew":   { "wert": 150.2,"stand": "2026-07-22", "quelle": "CBOE" },
+    "tariff": { "wert": 7.2,  "stand": "2026-05 (publ. 29.07.)", "quelle": "PWBM" },
+    "gpr":    { "wert": null, "stand": "n. v.", "quelle": "matteoiacoviello.com/gpr.htm" }
+  }
+}
