@@ -1,4 +1,6 @@
 name: Risiko-Cockpit
+concurrency:
+  group:cockpit
 on:
   schedule:
     - cron: "30 6 * * 1-5"
