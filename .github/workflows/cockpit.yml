@@ -1,10 +1,9 @@
+# Ablageort im Repository: .github/workflows/cockpit.yml
 name: Risiko-Cockpit
-concurrency:
-  group: cockpit
 on:
   schedule:
-    - cron: "30 6 * * 1-5"
-  workflow_dispatch: {}
+    - cron: "30 6 * * 1-5"   # werktags 06:30 UTC = 08:30 deutscher Zeit (07:30 im Winter)
+  workflow_dispatch: {}       # zusätzlich manuell startbar (Button "Run workflow")
 
 permissions:
   contents: write
@@ -18,10 +17,13 @@ jobs:
         with: { python-version: "3.12" }
       - run: pip install pandas==2.2.3
       - run: python cockpit.py
+        env:
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+          TD_API_KEY: ${{ secrets.TD_API_KEY }}
       - name: Ergebnis committen
         run: |
           git config user.name "cockpit-bot"
           git config user.email "bot@users.noreply.github.com"
           git add index.html
-          git diff --cached --quiet || git commit -m "Cockpit-Update"
+          git diff --cached --quiet || git commit -m "Cockpit-Update $(date -u +%F)"
           git push
