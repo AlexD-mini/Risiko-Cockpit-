@@ -3,12 +3,12 @@
 Läuft in GitHub Actions, erzeugt index.html. Keine API-Schlüssel nötig.
 Quellen: FRED (Makro/Kredit, CSV), Stooq (Kurse, CSV). Manuelle Werte: config.json.
 """
-import json, io, time, datetime as dt
+import json, io, os, time, datetime as dt
 import urllib.request
 import pandas as pd
-
+ 
 UA = {"User-Agent": "risiko-cockpit/1.0 (privates Monitoring-Skript)"}
-
+ 
 def get_csv(url, tries=3, wait=5):
     last = None
     for i in range(tries):
@@ -24,30 +24,48 @@ def get_csv(url, tries=3, wait=5):
             last = e
             time.sleep(wait * (i + 1))
     raise last
-
+ 
+def get_json(url, tries=3, wait=5):
+    last = None
+    for i in range(tries):
+        try:
+            req = urllib.request.Request(url, headers=UA)
+            with urllib.request.urlopen(req, timeout=60) as r:
+                return json.loads(r.read().decode("utf-8"))
+        except Exception as e:
+            last = e
+            time.sleep(wait * (i + 1))
+    raise last
+ 
 def fred(series):
-    df = get_csv(f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series}")
-    df.columns = ["date", "v"]
+    key = os.environ["FRED_API_KEY"]
+    j = get_json("https://api.stlouisfed.org/fred/series/observations"
+                 f"?series_id={series}&api_key={key}&file_type=json"
+                 "&observation_start=2024-01-01")
+    rows = [(o["date"], o["value"]) for o in j["observations"] if o["value"] != "."]
+    df = pd.DataFrame(rows, columns=["date", "v"])
     df["v"] = pd.to_numeric(df["v"], errors="coerce")
     return df.dropna().reset_index(drop=True)
-
+ 
 def stooq(sym, days=420):
-    d2 = dt.date.today(); d1 = d2 - dt.timedelta(days=days)
-    url = (f"https://stooq.com/q/d/l/?s={sym}&i=d"
-           f"&d1={d1:%Y%m%d}&d2={d2:%Y%m%d}")
-    time.sleep(1.5)  # Stooq nicht mit Anfragen fluten
-    df = get_csv(url)
-    if "Date" not in df.columns:
-        raise RuntimeError("Stooq lieferte keine Kursdaten (Limit/Blockade?): "
-                           + ",".join(map(str, df.columns))[:90])
-    df["Date"] = pd.to_datetime(df["Date"])
-    return df.set_index("Date")["Close"].astype(float)
-
+    """Kurse via Twelve Data (Name der Funktion aus Kompatibilitaet beibehalten).
+    Symbole im Stooq-Stil ('spy.us') werden zu 'SPY' uebersetzt."""
+    ticker = sym.split(".")[0].upper().replace("-", ".")  # brk-b.us -> BRK.B
+    key = os.environ["TD_API_KEY"]
+    time.sleep(8.5)  # Gratis-Limit: 8 Abrufe/Minute
+    j = get_json("https://api.twelvedata.com/time_series"
+                 f"?symbol={ticker}&interval=1day&outputsize=300&apikey={key}")
+    if "values" not in j:
+        raise RuntimeError(f"TwelveData {ticker}: " + str(j.get("message", j))[:90])
+    df = pd.DataFrame(j["values"])
+    df["Date"] = pd.to_datetime(df["datetime"])
+    return df.set_index("Date")["close"].astype(float).sort_index()
+ 
 # ---------- Indikatoren ----------
 def calc():
     cfg = json.load(open("config.json", encoding="utf-8"))
     out = {"stand": dt.date.today().isoformat(), "inds": [], "fehler": []}
-
+ 
     def add(block, name, value, y, r, dir_, note, veto=None):
         s = None
         if value is not None:
@@ -55,7 +73,7 @@ def calc():
             else:              s = 2 if value <= r else 1 if value <= y else 0
         out["inds"].append(dict(block=block, name=name, value=value,
                                 y=y, r=r, dir=dir_, note=note, score=s, veto=veto))
-
+ 
     # --- Kredit: HY-Spread, Niveau + 4-Wochen-Delta (FRED) ---
     try:
         hy = fred("BAMLH0A0HYM2")
@@ -67,7 +85,7 @@ def calc():
             "berechnet aus FRED-Reihe", veto=("rot", 100))
     except Exception as e:
         out["fehler"].append(f"HY-Spread: {e}")
-
+ 
     # --- Makro: Zinskurve 10J-3M (FRED) ---
     try:
         c = fred("T10Y3M")
@@ -76,7 +94,7 @@ def calc():
             f"FRED, {c.date.iloc[-1]}", veto=("gelb", 0))
     except Exception as e:
         out["fehler"].append(f"Zinskurve: {e}")
-
+ 
     # --- Marktstruktur: Aktien/Anleihen-Korrelation (SPY vs TLT, 1J Tagesrenditen) ---
     try:
         spy, tlt = stooq("spy.us"), stooq("tlt.us")
@@ -86,21 +104,21 @@ def calc():
             0.10, 0.35, "up", "SPY/TLT, 252 Handelstage, Stooq")
     except Exception as e:
         out["fehler"].append(f"SPY/TLT-Korrelation: {e}")
-
+ 
     # --- Marktstruktur: Ø Paarkorrelation großer Indexmitglieder ---
     try:
-        tickers = ["msft.us","aapl.us","nvda.us","amzn.us","googl.us","meta.us",
-                   "avgo.us","brk-b.us","jpm.us","xom.us","unh.us","pg.us"]
+        tickers = ["msft.us","aapl.us","nvda.us","amzn.us",
+                   "googl.us","jpm.us","xom.us","pg.us"]
         rets = pd.concat({t: stooq(t).pct_change() for t in tickers}, axis=1)\
                  .dropna().tail(126)                     # ~6 Monate
         cm = rets.corr().values
         n = cm.shape[0]
         pc = (cm.sum() - n) / (n * (n - 1))
-        add("Marktstruktur & Liquidität", "Ø Paarkorrelation (12 Titel)", round(pc, 2),
+        add("Marktstruktur & Liquidität", "Ø Paarkorrelation (8 Titel)", round(pc, 2),
             0.35, 0.55, "up", "6M-Fenster, Stooq")
     except Exception as e:
         out["fehler"].append(f"Paarkorrelation: {e}")
-
+ 
     # --- Bewertung: Zweiteilung — SPY vs. Equal-Weight-ETF RSP, 12M-Spread ---
     try:
         spy12 = stooq("spy.us"); rsp12 = stooq("rsp.us")
@@ -109,7 +127,7 @@ def calc():
             round(gap, 1), 12, 25, "up", "SPY/RSP, Stooq")
     except Exception as e:
         out["fehler"].append(f"SPY/RSP-Spread: {e}")
-
+ 
     # --- Manuelle Werte aus config.json ---
     m = cfg.get("manuell", {})
     man = [
@@ -126,17 +144,17 @@ def calc():
         add(block, name, e.get("wert"), y, r, d,
             f"manuell, Stand {e.get('stand','n. v.')}")
     return out
-
+ 
 # ---------- Ampeln & HTML ----------
 def lamp(mean): return 3 if mean is None else 2 if mean >= 1.34 else 1 if mean >= 0.67 else 0
-
+ 
 def render(d):
     COL = {0: "#1F7A4D", 1: "#B8860B", 2: "#B3362B", 3: "#9AA5AE"}
     LBL = {0: "GRÜN", 1: "GELB", 2: "ROT", 3: "KEINE DATEN"}
     blocks = {}
     for i in d["inds"]:
         blocks.setdefault(i["block"], []).append(i)
-
+ 
     vetotxt, vmax = [], 0
     for i in d["inds"]:
         if i["veto"] and i["value"] is not None:
@@ -144,7 +162,7 @@ def render(d):
             hit = (i["value"] <= i["veto"][1]) if i["dir"] == "down" else (i["value"] >= i["veto"][1])
             if hit:
                 vetotxt.append(f"VETO: {i['name']} → mind. {LBL[lv]}"); vmax = max(vmax, lv)
-
+ 
     bl, means = [], []
     for name, inds in blocks.items():
         sc = [i["score"] for i in inds if i["score"] is not None]
@@ -157,7 +175,7 @@ def render(d):
             for i in inds)
         bl.append(f"<div class='card'><h2><span class='dot big' style='background:{COL[lamp(mean)]}'></span>"
                   f"{name} <small>{len(sc)}/{len(inds)} belegt</small></h2><table>{rows}</table></div>")
-
+ 
     overall = lamp(sum(means)/len(means)) if means else 3
     overall = max(overall, vmax) if overall != 3 else (vmax or 3)
     vh = "".join(f"<div class='veto'>{t}</div>" for t in vetotxt)
@@ -188,7 +206,8 @@ footer{{max-width:640px;margin:14px auto;font-size:11px;color:#46617A}}</style>
 HY-Sprung ≥100 bp/4W → Rot. Quellen: FRED, Stooq, manuelle Konfiguration.
 Kein Prognoseinstrument, keine Anlageberatung.</footer></html>"""
     open("index.html", "w", encoding="utf-8").write(html)
-
+ 
 if __name__ == "__main__":
     render(calc())
     print("index.html erzeugt.")
+ 
