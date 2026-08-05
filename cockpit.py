@@ -1,69 +1,6 @@
-
-Claude hat die Antwort abgeschlossen
-Welcher Anbieter für kann github nicht selber push-Nachrichten ans iphone schicken?
-
-Doch – kann es, und das ist tatsächlich der eleganteste Weg für dich:
-
-Die GitHub-App selbst sendet Push-Nachrichten aufs iPhone. Sie ist installiert, angemeldet, kostenlos, kein Fremdanbieter, kein Secret, nichts mitlesbar. Der Trick besteht darin, das Cockpit so umzubauen, dass es GitHubs eigene Benachrichtigungswege nutzt:
-
-Variante A – Issue bei Alarm (mein Favorit). Bei Wechsel auf Rot oder Veto-Auslösung legt der Workflow automatisch ein Issue in deinem Repository an, z. B. „🔴 Veto: HY-Spread +112 bp in 4 Wochen". Da du der Eigentümer bist, schickt GitHub dir dafür eine Push-Nachricht auf iPhone (und eine E-Mail). Nebeneffekt: Du bekommst nebenbei ein dauerhaftes Alarm-Protokoll mit Datum – jedes Issue ist ein historischer Eintrag, den du abhaken kannst.
-
-Variante B – Fehler-Push. GitHub pusht standardmäßig bei fehlgeschlagenen Workflow-Läufen. Man könnte den Workflow bei Rot absichtlich scheitern lassen – funktioniert, ist aber unsauber, weil man dann echte Fehler nicht mehr von Alarmen unterscheiden kann. Würde ich nicht machen.
-
-Zur Aktivierung (einmalig): In der GitHub-App unter Profil → Einstellungen prüfen, dass Push-Nachrichten erlaubt sind; in den Web-Einstellungen unter „Notifications" sollte für „Participating" der Kanal Mobile/E-Mail aktiv sein.
-
-Damit entfällt ntfy.sh samt Mitlese-Risiko komplett – ein Anbieter weniger in der Kette, und das passt besser zu deiner Sicherheitslinie.
-
-Ergänzend zur Vollständigkeit: Rein technisch könnte man auch Apple Kurzbefehle die Cockpit-Seite abfragen lassen, aber das wäre wieder auf iOS-Hintergrundausführung angewiesen – genau das Problem, weshalb wir bei GitHub Actions gelandet sind.
-
-Soll ich Variante A einbauen (Alarm-Issue bei Rot/Veto, mit Schutz gegen tägliche Wiederholung desselben Alarms)? Dann baue ich sie zusammen mit Historie, Diagramm, Delta-Anzeige und Pflege-Wecker in einem Rutsch.
-
-
-excerpt_from_previous_claude_message.txt
-1 Zeile
-
-txt
-
-ja bitte, und immer schön an die Sicherheit denken ,-)
-
-
-Orchestrierte Workflow-Konfiguration mit Sicherheitsmaßnahmen und Token-Management
-Orchestrierte Workflow-Konfiguration mit Sicherheitsmaßnahmen und Token-Management
-Alle fünf Funktionen sind eingebaut und mit simulierten Daten getestet (inkl. erzwungenem Alarmfall):
-
-Historie – history.csv wächst täglich um eine Zeile (Datum, Gesamtampel, Blockampeln, alle Indikatorwerte), ein Lauf pro Tag ersetzt den vorherigen, 400 Einträge Rollfenster. Die Datei liegt im Repository und ist jederzeit für eigene Auswertungen herunterladbar.
-
-Kurvendiagramm – unter den Blöcken, letzte 90 Einträge, farbige Zonenbänder für Grün/Gelb/Rot. Bewusst als reines SVG ohne Diagrammbibliothek: kein externes Skript im Cockpit, nichts nachzuladen – das hält die Seite auch sicherheitsseitig sauber.
-
-Delta-Anzeige – unter jedem Wert erscheint ▲/▼ mit der Veränderung zum Vorlauf.
-
-Pflege-Wecker – gelber Kasten oben, sobald ein manueller Wert seine Altersgrenze reißt, mit Quellenangabe. Die Grenzen stehen jetzt in der config (max_alter_tage) und sind pro Indikator einstellbar: SKEW 14 Tage, CAPE 20, Margin Debt/GPR 45, Zollsatz 60, Hyperscaler-FCF 100, Top-10 120.
-
-Alarm-Push – bei Rot oder Veto legt der Lauf ein Issue mit Label „cockpit-alarm" an; die GitHub-App pusht es aufs iPhone. Wiederholungsschutz über eine Zustandssignatur: gleicher Zustand → kein neues Issue, erst bei Änderung (Test bestätigt: zweiter Lauf meldet „unverändert").
-
-Zur Sicherheit, wie gewünscht: Kein Fremddienst und kein zusätzliches Secret – der Push läuft über GitHubs eigenen Lauf-Token, der automatisch existiert, nur für dieses Repository gilt und nach jedem Lauf verfällt. Die Berechtigungen im Workflow sind auf das Nötigste beschränkt (contents + issues). Neu ist außerdem eine Redaction-Funktion: Sollte ein API-Schlüssel je in einer Fehlermeldung auftauchen, wird er vor Log und HTML-Ausgabe durch *** ersetzt. Alle Texte werden HTML-escaped, Fremddaten ausschließlich als Zahlen geparst – nichts aus einer Antwort wird ausgeführt oder als Anweisung behandelt.
-
-Einspielen: cockpit.py, config.json und .github/workflows/cockpit.yml durch die neuen Versionen ersetzen, dann „Run workflow". Beim ersten Lauf steht beim Diagramm noch der Hinweis, dass es ab dem zweiten Eintrag erscheint – ab morgen zeichnet es dann.
-
-
-Cockpit
-PY 
-
-Cockpit workflow
-YML 
-
-Config
-Code · JSON 
-
-
-
-
-
-Claude ist eine KI und kann Fehler machen. Bitte überprüfe die Antworten.
-Cockpit · PY
 # -*- coding: utf-8 -*-
 """Risiko-Cockpit – automatischer Datenabruf, Ampeln, Historie, Alarm-Issues.
- 
+
 Laeuft in GitHub Actions, erzeugt index.html und schreibt history.csv fort.
 Quellen: FRED-API (Makro/Kredit), Twelve Data (Kurse), config.json (manuelle Werte).
 Sicherheit: Schluessel ausschliesslich aus Umgebungsvariablen (GitHub Secrets),
@@ -73,11 +10,11 @@ alle Texte vor der HTML-Ausgabe escaped. Keine Ausfuehrung von Fremdinhalten.
 import json, io, os, re, time, html, datetime as dt
 import urllib.request
 import pandas as pd
- 
+
 UA = {"User-Agent": "risiko-cockpit/1.0 (privates Monitoring-Skript)"}
 HIST = "history.csv"
 STATE = "alarm_state.json"
- 
+
 # ---------------- Abruf-Helfer ----------------
 def _redact(msg):
     """Schluessel aus Fehlermeldungen entfernen, damit sie nie im Log/HTML landen."""
@@ -87,7 +24,7 @@ def _redact(msg):
         if v:
             s = s.replace(v, "***")
     return re.sub(r"(api_?key=)[^&\s]+", r"\1***", s, flags=re.I)
- 
+
 def get_json(url, tries=3, wait=5):
     last = None
     for i in range(tries):
@@ -99,7 +36,7 @@ def get_json(url, tries=3, wait=5):
             last = e
             time.sleep(wait * (i + 1))
     raise RuntimeError(_redact(last))
- 
+
 def fred(series):
     key = os.environ["FRED_API_KEY"]
     j = get_json("https://api.stlouisfed.org/fred/series/observations"
@@ -109,7 +46,7 @@ def fred(series):
     df = pd.DataFrame(rows, columns=["date", "v"])
     df["v"] = pd.to_numeric(df["v"], errors="coerce")
     return df.dropna().reset_index(drop=True)
- 
+
 def kurs(sym):
     """Tagesschlusskurse via Twelve Data. 'spy.us' -> 'SPY'."""
     ticker = sym.split(".")[0].upper().replace("-", ".")
@@ -122,7 +59,7 @@ def kurs(sym):
     df = pd.DataFrame(j["values"])
     df["Date"] = pd.to_datetime(df["datetime"])
     return df.set_index("Date")["close"].astype(float).sort_index()
- 
+
 # ---------------- Konfig-Pflege-Wecker ----------------
 def alter_tage(stand):
     """Alter eines manuellen Wertes in Tagen; None wenn nicht auswertbar."""
@@ -136,12 +73,12 @@ def alter_tage(stand):
         return (dt.date.today() - dt.date(y, mo, d)).days
     except ValueError:
         return None
- 
+
 # ---------------- Indikatoren ----------------
 def calc():
     cfg = json.load(open("config.json", encoding="utf-8"))
     out = {"stand": dt.date.today().isoformat(), "inds": [], "fehler": [], "pflege": []}
- 
+
     def add(block, name, value, y, r, dir_, note, veto=None, key=None):
         s = None
         if value is not None:
@@ -149,7 +86,7 @@ def calc():
                 else (2 if value <= r else 1 if value <= y else 0)
         out["inds"].append(dict(block=block, name=name, value=value, key=key or name,
                                 y=y, r=r, dir=dir_, note=note, score=s, veto=veto))
- 
+
     # --- Kredit: HY-Spread, Niveau + 4-Wochen-Delta (FRED) ---
     try:
         hy = fred("BAMLH0A0HYM2")
@@ -161,7 +98,7 @@ def calc():
             "berechnet aus FRED-Reihe", veto=("rot", 100), key="hy_d4w")
     except Exception as e:
         out["fehler"].append(f"HY-Spread: {_redact(e)}")
- 
+
     # --- Makro: Zinskurve 10J-3M (FRED) ---
     try:
         c = fred("T10Y3M")
@@ -169,7 +106,7 @@ def calc():
             f"FRED-API, {c.date.iloc[-1]}", veto=("gelb", 0), key="curve")
     except Exception as e:
         out["fehler"].append(f"Zinskurve: {_redact(e)}")
- 
+
     # --- Marktstruktur: Aktien/Anleihen-Korrelation ---
     try:
         spy, tlt = kurs("spy.us"), kurs("tlt.us")
@@ -179,7 +116,7 @@ def calc():
             "SPY/TLT, 252 Handelstage, Twelve Data", key="corr_sb")
     except Exception as e:
         out["fehler"].append(f"SPY/TLT-Korrelation: {_redact(e)}")
- 
+
     # --- Marktstruktur: Ø Paarkorrelation ---
     try:
         tickers = ["msft.us", "aapl.us", "nvda.us", "amzn.us",
@@ -192,7 +129,7 @@ def calc():
             "6M-Fenster, Twelve Data", key="corr_pair")
     except Exception as e:
         out["fehler"].append(f"Paarkorrelation: {_redact(e)}")
- 
+
     # --- Bewertung: SPY vs. Equal Weight (RSP), 12M ---
     try:
         s12, r12 = kurs("spy.us"), kurs("rsp.us")
@@ -201,7 +138,7 @@ def calc():
             round(gap, 1), 12, 25, "up", "SPY/RSP, Twelve Data", key="ew_gap")
     except Exception as e:
         out["fehler"].append(f"SPY/RSP-Spread: {_redact(e)}")
- 
+
     # --- Manuelle Werte + Pflege-Wecker ---
     m = cfg.get("manuell", {})
     maxalter = cfg.get("max_alter_tage", {})
@@ -227,11 +164,11 @@ def calc():
             out["pflege"].append(f"{name}: kein Wert hinterlegt – {e.get('quelle','Quelle s. config')}")
         add(block, name, e.get("wert"), y, r, d, note, key=key)
     return out
- 
+
 # ---------------- Ampeln ----------------
 def lamp(mean):
     return 3 if mean is None else 2 if mean >= 1.34 else 1 if mean >= 0.67 else 0
- 
+
 def bewerte(d):
     blocks = {}
     for i in d["inds"]:
@@ -254,7 +191,7 @@ def bewerte(d):
     overall = lamp(sum(means) / len(means)) if means else 3
     overall = max(overall, vmax) if overall != 3 else (vmax or 3)
     return binfo, vetos, overall
- 
+
 # ---------------- Historie ----------------
 def historie_fortschreiben(d, binfo, overall):
     row = {"datum": d["stand"], "gesamt": overall}
@@ -272,7 +209,7 @@ def historie_fortschreiben(d, binfo, overall):
     hist = hist.sort_values("datum").tail(400)
     hist.to_csv(HIST, index=False)
     return hist
- 
+
 def deltas(hist, d):
     """Veraenderung je Indikator gegenueber dem vorherigen Eintrag."""
     out = {}
@@ -290,7 +227,7 @@ def deltas(hist, d):
         if diff != 0:
             out[i["key"]] = (diff, str(prev["datum"]))
     return out
- 
+
 # ---------------- Diagramm (reines SVG, keine Fremdbibliothek) ----------------
 def chart(hist):
     h = hist.tail(90)
@@ -316,7 +253,7 @@ def chart(hist):
     return (f"<div class='card'><h2>Verlauf Gesamtampel <small>{n} Einträge</small></h2>"
             f"<svg viewBox='0 0 {W} {H}' width='100%' role='img' aria-label='Verlauf der Gesamtampel'>"
             f"{bands}<polyline points='{pts}' fill='none' stroke='#46617A' stroke-width='1.6'/>{dots}{lab}</svg></div>")
- 
+
 # ---------------- Alarm-Issue (GitHub-eigener Push) ----------------
 def alarm(overall, vetos, d):
     """Legt bei NEUEM Rot-Zustand oder NEUEM Veto ein Issue an -> Push via GitHub-App.
@@ -353,11 +290,11 @@ def alarm(overall, vetos, d):
             return f"Issue angelegt ({r.status})"
     except Exception as e:
         return "Issue fehlgeschlagen: " + _redact(e)[:80]
- 
+
 # ---------------- HTML ----------------
 COL = {0: "#1F7A4D", 1: "#B8860B", 2: "#B3362B", 3: "#9AA5AE"}
 LBL = {0: "GRÜN", 1: "GELB", 2: "ROT", 3: "KEINE DATEN"}
- 
+
 def render(d, binfo, vetos, overall, hist, dlt):
     E = html.escape
     karten = []
@@ -378,12 +315,12 @@ def render(d, binfo, vetos, overall, hist, dlt):
             f"<div class='card'><h2><span class='dot big' style='background:{COL[b['lamp']]}'></span>"
             f"{E(name)} <small>{b['n']}/{b['total']} belegt</small></h2>"
             f"<table>{''.join(rows)}</table></div>")
- 
+
     vh = "".join(f"<div class='veto'>VETO · {E(v)}</div>" for v in vetos)
     ph = ("<div class='pflege'><b>⏰ Pflege fällig:</b><ul>"
           + "".join(f"<li>{E(p)}</li>" for p in d["pflege"]) + "</ul></div>") if d["pflege"] else ""
     eh = ("<div class='err'>Abruf-Fehler: " + E(" · ".join(d["fehler"])) + "</div>") if d["fehler"] else ""
- 
+
     html_out = f"""<!doctype html><html lang='de'><meta charset='utf-8'>
 <meta name='viewport' content='width=device-width,initial-scale=1'>
 <title>Risiko-Cockpit</title><style>
@@ -416,18 +353,10 @@ HY-Sprung ≥100 bp/4W → Rot. Δ-Werte zeigen die Veränderung zum vorherigen 
 Quellen: FRED-API, Twelve Data, manuelle Konfiguration (config.json).
 Kein Prognoseinstrument, keine Anlageberatung.</footer></html>"""
     open("index.html", "w", encoding="utf-8").write(html_out)
- 
+
 if __name__ == "__main__":
     d = calc()
     binfo, vetos, overall = bewerte(d)
     hist = historie_fortschreiben(d, binfo, overall)
     render(d, binfo, vetos, overall, hist, deltas(hist, d))
     print("index.html erzeugt. Alarm:", alarm(overall, vetos, d))
- 
-
-
-
-
-
-
-
