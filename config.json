@@ -21,8 +21,8 @@
       "quelle": "SSGA SPY Holdings"
     },
     "margin": {
-      "wert": 49,
-      "stand": "2026-06-24",
+      "wert": 38.5,
+      "stand": "2026-31-07",
       "quelle": "FINRA Margin Statistics"
     },
     "hs_fcf": {
@@ -31,18 +31,18 @@
       "quelle": "Q2-Berichte MSFT/GOOGL/AMZN/META"
     },
     "skew": {
-      "wert": 150.2,
-      "stand": "2026-07-22",
+      "wert": 138.36,
+      "stand": "2026-08-14",
       "quelle": "CBOE"
     },
     "tariff": {
-      "wert": 7.2,
-      "stand": "2026-05-01",
+      "wert": 11,
+      "stand": "2026-08-11",
       "quelle": "PWBM (Datenstand Mai)"
     },
     "gpr": {
-      "wert": null,
-      "stand": "n. v.",
+      "wert": 92.5,
+      "stand": "2026-08-17",
       "quelle": "matteoiacoviello.com/gpr.htm"
     }
   }
